@@ -96,13 +96,6 @@
 
     <script>
         const canvas = document.querySelector("canvas");
-        canvas.addEventListener("mousedown", event => {
-            canvas.dataset.grabbing = '';
-        });
-        canvas.addEventListener("mouseup", event => {
-            delete canvas.dataset.grabbing;
-        });
-
         const context = canvas.getContext('2d');
     </script>
 
@@ -114,16 +107,14 @@
                 
                 this.reset();
                 
-                this.subscribe("set", "magnetURI", this.setMagnetURI);
+                this.subscribe("magnetURI", "set", this.setMagnetURI);
+                this.subscribe("pageNumber", "set", this.setPageNumber);
+                this.subscribe("scale", "set", this.setScale);
+                this.subscribe("rotation", "set", this.setRotation);
+                this.subscribe("offsetX", "set", this.setOffsetX);
+                this.subscribe("offsetY", "set", this.setOffsetY);
 
-                this.subscribe("set", "pageNumber", this.setPageNumber);
-        
-                this.subscribe("set", "scale", this.setScale);
-        
-                this.subscribe("set", "rotation", this.setRotation);
-        
-                this.subscribe("set", "offsetX", this.setOffsetX);
-                this.subscribe("set", "offsetY", this.setOffsetY);
+
             }
 
             reset() {
@@ -146,36 +137,36 @@
                     delete this.magnetURI;
 
                 this.reset();
-                this.publish("update", "magnetURI", magnetURI);
+                this.publish("magnetURI", "update", magnetURI);
             }
 
             setPageNumber(pageNumber) {
                 this.pageNumber = pageNumber;
                 
-                this.publish("update", "pageNumber", pageNumber);
+                this.publish("pageNumber", "update", pageNumber);
             }
         
             setScale(scale) {
                 this.getViewportOptions.scale = scale;
         
-                this.publish("update", "scale", scale);
+                this.publish("scale", "update", scale);
             }
         
             setRotation(rotation) {
                 this.getViewportOptions.rotation = rotation;
         
-                this.publish("update", "rotation", rotation);
+                this.publish("rotation", "update", rotation);
             }
             
             setOffsetX(offsetX) {
                 this.getViewportOptions.offsetX = offsetX;
         
-                this.publish("update", "offsetX", offsetX);
+                this.publish("offsetX", "update", offsetX);
             }
             setOffsetY(offsetY) {
                 this.getViewportOptions.offsetY = offsetY;
         
-                this.publish("update", "offsetY", offsetY);
+                this.publish("offsetY", "update", offsetY);
             }
         }
         Model.register();
@@ -186,7 +177,6 @@
         class ThrottleView extends Croquet.View {
             constructor(model) {
                 super(model);
-                this.subscribe(this.viewId, "detach", this.detach);
         
                 this._lastTimeThrottledEventsWerePublished = {};
                 this._throttledEventTimeoutHandlers = {};
@@ -418,8 +408,42 @@
                     thisArg : this,
                 });
 
+                this.canvas = document.querySelector(`canvas`);
+                this.publish("eventListener", "add", {
+                    element : this.canvas,
+                    type : "wheel",
+                    listener : this.onCanvasScroll,
+                    thisArg : this,
+                });
+                this.publish("eventListener", "add", {
+                    element : this.canvas,
+                    type : "mousedown",
+                    listener : this.onCanvasMouseDown,
+                    thisArg : this,
+                });
+                this.publish("eventListener", "add", {
+                    element : this.canvas,
+                    type : "mouseup",
+                    listener : this.onCanvasMouseUp,
+                    thisArg : this,
+                });
+                this.publish("eventListener", "add", {
+                    element : this.canvas,
+                    type : "mousemove",
+                    listener : this.onCanvasMouseMove,
+                    thisArg : this,
+                });
+
+                this.publish("eventListener", "add",  {
+                    element : window,
+                    type : "keydown",
+                    listener : this.onWindowKeydown,
+                    thisArg : this,
+                });
+
                 this.numPagesSpan = document.querySelector(`span[data-num-pages]`);
-                this.subscribe("get", "pdf", this.onPDF);
+                this.subscribe("pdf", "get", this.onPDF);
+                this.subscribe("page", "get", this.onPage);
 
                 this.onUpdate();
 
@@ -441,19 +465,19 @@
                     files,
                     callback : torrent => {
                         const {magnetURI} = torrent;
-                        this.publish("set", "magnetURI", magnetURI);
+                        this.publish("magnetURI", "set", magnetURI);
                         event.target.value = '';
                     }
                 });
             }
 
             onClearButtonClick(event) {
-                this.publish("set", "magnetURI");
+                this.publish("magnetURI", "set");
             }
 
             onPageNumberInput(event) {
                 const pageNumber = Number(event.target.value);
-                this.publish("set", "pageNumber", pageNumber);
+                this.publish("pageNumber", "set", pageNumber);
             }
             onUpdatePageNumber() {
                 this.pageNumberInput.value = this.model.pageNumber;
@@ -461,7 +485,7 @@
 
             onScaleInput(event) {
                 const scale = Number(event.target.value);
-                this.publish("set", "scale", scale);
+                this.publish("scale", "set", scale);
             }
             onUpdateScale() {
                 this.scaleInput.value = this.model.getViewportOptions.scale;
@@ -469,7 +493,7 @@
 
             onRotationInput(event) {
                 const rotation = Number(event.target.value);
-                this.publish("set", "rotation", rotation);
+                this.publish("rotation", "set", rotation);
             }
             onUpdateRotation() {
                 this.rotationInput.value = this.model.getViewportOptions.rotation;
@@ -477,7 +501,7 @@
 
             onOffsetX(event) {
                 const offsetX = Number(event.target.value);
-                this.publish("set", "offsetX", offsetX);
+                this.publish("offsetX", "set", offsetX);
             }
             onUpdateOffsetX() {
                 this.offsetXInput.value = this.model.getViewportOptions.offsetX;
@@ -485,10 +509,45 @@
 
             onOffsetY(event) {
                 const offsetY = Number(event.target.value);
-                this.publish("set", "offsetY", offsetY);
+                this.publish("offsetY", "set", offsetY);
             }
             onUpdateOffsetY() {
                 this.offsetYInput.value = this.model.getViewportOptions.offsetY;
+            }
+
+            onCanvasScroll(event) {
+                console.log(event);
+            }
+            onCanvasMouseDown(event) {
+                canvas.dataset.grabbing = '';
+            }
+            onCanvasMouseUp(event) {
+                delete canvas.dataset.grabbing;
+            }
+            onCanvasMouseMove(event) {
+                if(this.canvas.hasAttribute(`data-grabbing`)) {
+                    const {clientX, clientY} = event;
+                    const {offsetX, offsetY} = event;
+                    const {movementX, movementY} = event;
+                    console.log(movementX, movementY);
+                }
+            }
+
+            onWindowKeydown(event) {
+                switch(event.key) {
+                    case "ArrowRight":
+                        // next slide
+                        break;
+                    case "ArrowLeft":
+                        // previous slide
+                        break;
+                    case "ArrowUp":
+                        // rotate
+                        break;
+                    case "ArrowDown":
+                        // rotate
+                         break;
+                }
             }
 
             onPDF(pdf) {
@@ -497,6 +556,9 @@
                 this.numPagesSpan.innerText = `/${numPages}`;
 
                 this.onUpdate();
+            }
+            onPage(page) {
+
             }
 
             onUpdate() {
@@ -526,23 +588,13 @@
                 this.throttle = new ThrottleView(model);
 
                 this.getPDFSource();
-                this._render = true;
 
-                this.subscribe("update", "magnetURI", this.onUpdateMagnetURI);
-                this.subscribe("update", "pageNumber", this.onUpdatePageNumber);
-                this.subscribe("update", "scale", this.onUpdateScale);
-                this.subscribe("update", "rotation", this.onUpdateRotation);
-                this.subscribe("update", "offsetX", this.onUpdateOffsetX);
-                this.subscribe("update", "offsetY", this.onUpdateOffsetY);
-            }
-
-            getPDF(blobURL) {
-                this.loadingTask = pdfjsLib.getDocument(blobURL || "croquet.pdf");
-                this.loadingTask.promise.then(pdf => {
-                        this.pdf = pdf;
-                        this.publish("get", "pdf", pdf);
-                        this.render();
-                    });
+                this.subscribe("magnetURI", "update", this.onUpdateMagnetURI);
+                this.subscribe("pageNumber", "update", this.onUpdatePageNumber);
+                this.subscribe("scale", "update", this.onUpdateScale);
+                this.subscribe("rotation", "update", this.onUpdateRotation);
+                this.subscribe("offsetX", "update", this.onUpdateOffsetX);
+                this.subscribe("offsetY", "update", this.onUpdateOffsetY);
             }
 
             getPDFSource() {
@@ -568,22 +620,39 @@
                 }
             }
 
-            render() {
+            getPDF(blobURL) {
+                this.loadingTask = pdfjsLib.getDocument(blobURL || "croquet.pdf");
+                this.loadingTask.promise.then(pdf => {
+                        this.pdf = pdf;
+                        this.publish("pdf", "get", pdf);
+                        this.getPage();
+                    });
+            }
+
+            getPage() {
                 if(this.pdf) {
-                    this.pdf.getPage(this.model.pageNumber).then(page => {
-                        window.page = page;
-                        const viewport = page.getViewport(this.model.getViewportOptions); 
-                        
-                        viewport.transform[4] += this.model.getViewportOptions.offsetX
-                        viewport.transform[5] += this.model.getViewportOptions.offsetY;
-    
-                        canvas.width = viewport.width;
-                        canvas.height = viewport.height;
-    
-                        page.render({
-                            canvasContext : context,
-                            viewport,
+                    this.pdf.getPage(this.model.pageNumber)
+                        .then(page => {
+                            this.page = page;
+                            this.publish("page", "get", page);
+                            this._render = true;
                         });
+                }
+            }
+
+            render() {
+                if(this.page) {
+                    const viewport = this.page.getViewport(this.model.getViewportOptions); 
+                    
+                    viewport.transform[4] += this.model.getViewportOptions.offsetX
+                    viewport.transform[5] += this.model.getViewportOptions.offsetY;
+
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+
+                    this.page.render({
+                        canvasContext : context,
+                        viewport,
                     });
                 }
             }
@@ -592,7 +661,7 @@
                 this.getPDFSource();
             }
             onUpdatePageNumber() {
-                this._render = true;
+                this.getPage();
             }
             onUpdateScale() {
                 this._render = true;
@@ -607,28 +676,6 @@
                 this._render = true;
             }
 
-            setMagnetURI(magnetURI) {
-                this.publish("set", "magnetURI", magnetURI);
-            }
-            clearMagnetURI() {
-                this.publish("set", "magnetURI");
-            }
-            setPageNumber(pageNumber) {
-                this.publish("set", "pageNumber", pageNumber);
-            }
-            setScale(scale) {
-                this.publish("set", "scale", scale);
-            }
-            setRotation(rotation) {
-                this.publish("set", "rotation", rotation);
-            }
-            setOffsetX(offsetX) {
-                this.publish("set", "offsetX", offsetX);
-            }
-            setOffsetY(offsetY) {
-                this.publish("set", "offsetY", offsetY);
-            }
-
             update() {
                 if(this._render) {
                     this.render();
@@ -637,9 +684,10 @@
             }
 
             detach() {
-                this.client.detach();
                 this.eventListener.detach();
                 this.ui.detach();
+                this.client.detach();
+                this.throttle.detach();
                 super.detach();
             }
         }
