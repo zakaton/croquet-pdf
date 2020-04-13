@@ -1,0 +1,656 @@
+<html>
+    <head>
+        <title>Croquet PDF</title>
+
+        <!-- https://github.com/mozilla/pdf.js -->
+        <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.3.200/build/pdf.min.js"></script>
+
+        <!-- https://github.com/webtorrent/webtorrent/blob/master/docs/api.md -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/webtorrent/0.107.17/webtorrent.min.js"></script>
+        
+        <!-- https://croquet.studio/sdk/docs/index.html -->
+        <meta charset="utf-8">
+        <script src="https://croquet.io/sdk/croquet-latest.min.js"></script>
+    </head>
+
+    <style>
+        #container {
+            display: grid;
+            grid-template-rows: 2em 1fr;
+            grid-template-columns: repeat(7, 1fr);
+
+            width: 100%;
+            height: 100%;
+        }
+
+        canvas {
+            
+        }
+
+        canvas:not([data-grabbing]) {
+            cursor: grab;
+        }
+        canvas[data-grabbing] {
+            cursor: grabbing;
+        }
+
+        #canvasContainer {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+
+            grid-row: 2;
+            grid-column: 1 / -1;
+        }
+
+        input[data-page-number] {
+            grid-row: 1;
+            width: 4em;
+        }
+        input[data-file] {
+            grid-row: 1;
+        }
+        button[data-file] {
+            grid-row: 1;
+        }
+        span[data-num-pages] {
+            grid-row: 1;
+        }
+        input[data-scale] {
+            grid-row: 1;
+        }
+        input[data-offset='x'] {
+            grid-row: 1;
+            width: 3em;
+        }
+        input[data-offset='y'] {
+            grid-row: 1;
+            width: 3em;
+        }
+        input[data-rotation] {
+            grid-row: 1;
+            width: 3em;
+        }
+    </style>
+
+    <body>
+        <div id="container">
+            <input data-page-number type="number" value='1' min='1' step='1'>
+            <span data-num-pages>/</span>
+            
+            <input data-file type="file" accept="application/pdf">
+            <button data-file>Clear Input</button>
+            
+            <input type="number" value='1' data-scale step='0.1' min='0.1' max='10'>
+            
+            <input type="number" data-rotation value='0' min='-360' max='360' step='90'>
+
+            <input type="number" data-offset='x' value='0' step='10'>
+            <input type="number" data-offset='y' value='0' step='10'>
+            
+            <div id="canvasContainer">
+                <canvas></canvas>
+            </div>
+        </div>
+    </body>
+
+    <script>
+        const canvas = document.querySelector("canvas");
+        canvas.addEventListener("mousedown", event => {
+            canvas.dataset.grabbing = '';
+        });
+        canvas.addEventListener("mouseup", event => {
+            delete canvas.dataset.grabbing;
+        });
+
+        const context = canvas.getContext('2d');
+    </script>
+
+    <script data-croquet-model>
+
+        class Model extends Croquet.Model {
+            init() {
+                super.init();
+                
+                this.reset();
+                
+                this.subscribe("set", "magnetURI", this.setMagnetURI);
+
+                this.subscribe("set", "pageNumber", this.setPageNumber);
+        
+                this.subscribe("set", "scale", this.setScale);
+        
+                this.subscribe("set", "rotation", this.setRotation);
+        
+                this.subscribe("set", "offsetX", this.setOffsetX);
+                this.subscribe("set", "offsetY", this.setOffsetY);
+            }
+
+            reset() {
+                this.pageNumber = 1;
+
+                this.getViewportOptions = {
+                    scale : 1,
+        
+                    offsetX : 0,
+                    offsetY : 0,
+        
+                    rotation : 0,
+                }
+            }
+        
+            setMagnetURI(magnetURI) {
+                if(magnetURI)
+                    this.magnetURI = magnetURI;
+                else
+                    delete this.magnetURI;
+
+                this.reset();
+                this.publish("update", "magnetURI", magnetURI);
+            }
+
+            setPageNumber(pageNumber) {
+                this.pageNumber = pageNumber;
+                
+                this.publish("update", "pageNumber", pageNumber);
+            }
+        
+            setScale(scale) {
+                this.getViewportOptions.scale = scale;
+        
+                this.publish("update", "scale", scale);
+            }
+        
+            setRotation(rotation) {
+                this.getViewportOptions.rotation = rotation;
+        
+                this.publish("update", "rotation", rotation);
+            }
+            
+            setOffsetX(offsetX) {
+                this.getViewportOptions.offsetX = offsetX;
+        
+                this.publish("update", "offsetX", offsetX);
+            }
+            setOffsetY(offsetY) {
+                this.getViewportOptions.offsetY = offsetY;
+        
+                this.publish("update", "offsetY", offsetY);
+            }
+        }
+        Model.register();
+    </script>
+
+    <script data-croquet-view="throttle">
+
+        class ThrottleView extends Croquet.View {
+            constructor(model) {
+                super(model);
+                this.subscribe(this.viewId, "detach", this.detach);
+        
+                this._lastTimeThrottledEventsWerePublished = {};
+                this._throttledEventTimeoutHandlers = {};
+
+                this.subscribe("throttle", "publish", this._publish);
+            }
+
+            _getThrottleKey(scope, event) {
+                return `${scope}-${event}`;
+            };
+            _clearThrottleTimeout(scope, event) {
+                clearTimeout(this._throttledEventTimeoutHandlers[this._getThrottleKey(...arguments)]);
+            };
+
+            _setThrottleTimeout(scope, event, data, delay) {
+                this._clearThrottleTimeout(...arguments);
+                this._throttledEventTimeoutHandlers[this._getThrottleKey(...arguments)] = setTimeout(() => {
+                    super.publish(...arguments);
+                    this._lastTimeThrottledEventsWerePublished[this._getThrottleKey(...arguments)] = Date.now();
+                }, delay);
+            };
+
+            publish(scope, event, data, delayMinimum = 0) {
+                const lastTimeEventWasPublished = this._lastTimeThrottledEventsWerePublished[this._getThrottleKey(...arguments)] || 0;
+                const now = Date.now();
+                const timeSinceLastPublish = now - lastTimeEventWasPublished;
+                if(timeSinceLastPublish >= delayMinimum) {
+                    super.publish(...arguments);
+                    this._lastTimeThrottledEventsWerePublished[this._getThrottleKey(...arguments)] = now;
+                }
+                else {
+                    const remainingDelay = delayMinimum - timeSinceLastPublish;
+                    this._setThrottleTimeout(scope, event, data, remainingDelay);
+                }
+            }
+            _publish({scope, event, data, delayMinimum}) {
+                this.publish(scope, event, data, delayMinimum);
+            }
+
+            _clear() {
+                for(const timeoutHandler in this._throttledEventTimeoutHandlers)
+                    clearTimeout(timeoutHandler);
+            }
+
+            detach() {
+                this._clear();
+                super.detach();
+            }
+        }
+    </script>
+
+    <script data-croquet-view="WebTorrent">
+
+        class WebTorrentView extends Croquet.View {
+            constructor(model) {
+                super(model);
+
+                // https://github.com/webtorrent/webtorrent/blob/master/docs/api.md#client--new-webtorrentopts
+                this._client = new WebTorrent();
+                this._hashingClient = new WebTorrent();
+
+                this.subscribe("torrent", "add", this._add);
+                this.subscribe("torrent", "seed", this._seed);
+            }
+
+            getMagnetURI(files, callback) {
+                // https://github.com/webtorrent/webtorrent/blob/master/docs/api.md#clientseedinput-opts-function-onseed-torrent-
+                this._hashingClient.seed(files, torrent => {
+                    const {magnetURI} = torrent;
+
+                    // https://github.com/webtorrent/webtorrent/blob/master/docs/api.md#torrentdestroycallback
+                    torrent.destroy(() => {
+                        callback(magnetURI);
+                    });
+                });
+            }
+
+            seed(files, options, callback) {
+                this.getMagnetURI(files, magnetURI => {
+                    // https://github.com/webtorrent/webtorrent/blob/master/docs/api.md#clientgettorrentid
+                    const _torrent = this._client.get(magnetURI);
+
+                    if(_torrent) {
+                        // https://github.com/webtorrent/webtorrent/blob/master/docs/api.md#torrentdestroycallback
+                        _torrent.destroy(() => {
+                            // https://github.com/webtorrent/webtorrent/blob/master/docs/api.md#clientseedinput-opts-function-onseed-torrent-
+                            this._client.seed(...arguments);
+                        });
+                    }
+                    else {
+                        // https://github.com/webtorrent/webtorrent/blob/master/docs/api.md#clientseedinput-opts-function-onseed-torrent-
+                        this._client.seed(...arguments);
+                    }
+                });
+            }
+            _seed({files, options, callback}) {
+                this.seed(files, options, callback);
+            }
+
+            add(torrentId, options, callback) {
+                // https://github.com/webtorrent/webtorrent/blob/master/docs/api.md#clientgettorrentid
+                const torrent = this._client.get(torrentId);
+                if(!torrent) {
+                    // https://github.com/webtorrent/webtorrent/blob/master/docs/api.md#clientaddtorrentid-opts-function-ontorrent-torrent-
+                    this._client.add(...arguments);
+                }
+                else {
+                    callback = callback || options;
+                    callback(torrent);
+                }
+            }
+            _add({torrentId, options, callback}) {
+                this.add(torrentId, options, callback);
+            }
+
+            detach() {
+                // https://github.com/webtorrent/webtorrent/blob/master/docs/api.md#clientdestroyfunction-callback-err-
+                this._client.destroy();
+                this._hashingClient.destroy();
+                
+                super.detach();
+            }
+        }
+    </script>
+
+    <script data-croquet-view="eventListener">
+
+        class EventListener extends Croquet.View {
+            constructor(model) {
+                super(model);
+
+                this.eventListeners = [];
+
+                this.subscribe("eventListener", "add", this._addEventListener);
+                this.subscribe("eventListener", "remove", this._removeEventListeners);
+            }
+
+            addEventListener(element, type, listener, thisArg = this) {
+                listener = listener.bind(thisArg);
+                this.eventListeners.push({element, type, listener});
+
+                element.addEventListener(type, listener);
+            }
+            _addEventListener({element, type, listener, thisArg}) {
+                this.addEventListener(element, type, listener, thisArg);
+            }
+
+            removeEventListeners() {
+                this.eventListeners.forEach(function({element, type, listener}) {
+                    element.removeEventListener(type, listener);
+                });
+            }
+            _removeEventListeners() {
+                this.removeEventListeners();
+            }
+
+            detach() {
+                this.removeEventListeners();
+                super.detach();
+            }
+        }
+    </script>
+
+    <script data-croquet-view="ui">
+
+        class UIView extends Croquet.View {
+            constructor(model) {
+                super(model);
+                this.model = model;
+
+                this.fileInput = document.querySelector(`input[type="file"][data-file]`);
+                this.publish("eventListener", "add", {
+                    element : this.fileInput,
+                    type : "input",
+                    listener : this.onFileInput,
+                    thisArg : this,
+                });
+                
+                this.clearButton = document.querySelector(`button[data-file]`);
+                this.publish("eventListener", "add", {
+                    element : this.clearButton,
+                    type : "click",
+                    listener : this.onClearButtonClick,
+                    thisArg : this,
+                });
+
+                this.pageNumberInput = document.querySelector(`input[type="number"][data-page-number]`);
+                this.subscribe("update", "pageNumber", this.onUpdatePageNumber);
+                this.publish("eventListener", "add", {
+                    element : this.pageNumberInput,
+                    type : "input",
+                    listener : this.onPageNumberInput,
+                    thisArg : this,
+                });
+
+                this.scaleInput = document.querySelector(`input[data-scale]`);
+                this.subscribe("update", "scale", this.onUpdateScale);
+                this.publish("eventListener", "add", {
+                    element : this.scaleInput,
+                    type : "input",
+                    listener : this.onScaleInput,
+                    thisArg : this,
+                });
+
+                this.rotationInput = document.querySelector(`input[data-rotation]`);
+                this.subscribe("update", "rotation", this.onUpdateRotation);
+                this.publish("eventListener", "add", {
+                    element : this.rotationInput,
+                    type : "input",
+                    listener : this.onRotationInput,
+                    thisArg : this,
+                });
+
+                this.offsetXInput = document.querySelector(`input[data-offset='x']`);
+                this.subscribe("update", "offsetX", this.onUpdateOffsetX);
+                this.publish("eventListener", "add", {
+                    element : this.offsetXInput,
+                    type : "input",
+                    listener : this.onOffsetX,
+                    thisArg : this,
+                });
+
+                this.offsetYInput = document.querySelector(`input[data-offset='y']`);
+                this.subscribe("update", "offsetY", this.onUpdateOffsetY);
+                this.publish("eventListener", "add", {
+                    element : this.offsetYInput,
+                    type : "input",
+                    listener : this.onOffsetY,
+                    thisArg : this,
+                });
+
+                this.numPagesSpan = document.querySelector(`span[data-num-pages]`);
+                this.subscribe("get", "pdf", this.onPDF);
+
+                this.onUpdate();
+
+                /*
+                use this if too many messages
+                this.publish("throttle", "publish", {
+                    scope : "set",
+                    event : "scale",
+                    data : scale,
+                    delayMinimum : 10,
+                });
+                */
+            }
+
+            onFileInput(event) {
+                const {files} = event.target;
+
+                this.publish("torrent", "seed", {
+                    files,
+                    callback : torrent => {
+                        const {magnetURI} = torrent;
+                        this.publish("set", "magnetURI", magnetURI);
+                        event.target.value = '';
+                    }
+                });
+            }
+
+            onClearButtonClick(event) {
+                this.publish("set", "magnetURI");
+            }
+
+            onPageNumberInput(event) {
+                const pageNumber = Number(event.target.value);
+                this.publish("set", "pageNumber", pageNumber);
+            }
+            onUpdatePageNumber() {
+                this.pageNumberInput.value = this.model.pageNumber;
+            }
+
+            onScaleInput(event) {
+                const scale = Number(event.target.value);
+                this.publish("set", "scale", scale);
+            }
+            onUpdateScale() {
+                this.scaleInput.value = this.model.getViewportOptions.scale;
+            }
+
+            onRotationInput(event) {
+                const rotation = Number(event.target.value);
+                this.publish("set", "rotation", rotation);
+            }
+            onUpdateRotation() {
+                this.rotationInput.value = this.model.getViewportOptions.rotation;
+            }
+
+            onOffsetX(event) {
+                const offsetX = Number(event.target.value);
+                this.publish("set", "offsetX", offsetX);
+            }
+            onUpdateOffsetX() {
+                this.offsetXInput.value = this.model.getViewportOptions.offsetX;
+            }
+
+            onOffsetY(event) {
+                const offsetY = Number(event.target.value);
+                this.publish("set", "offsetY", offsetY);
+            }
+            onUpdateOffsetY() {
+                this.offsetYInput.value = this.model.getViewportOptions.offsetY;
+            }
+
+            onPDF(pdf) {
+                const {numPages} = pdf._pdfInfo;
+                this.pageNumberInput.max = numPages;
+                this.numPagesSpan.innerText = `/${numPages}`;
+
+                this.onUpdate();
+            }
+
+            onUpdate() {
+                this.onUpdatePageNumber();
+                this.onUpdateScale();
+                this.onUpdateRotation();
+                this.onUpdateOffsetX();
+                this.onUpdateOffsetY();
+            }
+
+            detach() {
+                super.detach();
+            }
+        }
+    </script>
+
+    <script data-croquet-view>
+
+        class View extends Croquet.View {
+            constructor(model) {
+                super(model);
+                this.model = model;
+
+                this.eventListener = new EventListener(model);
+                this.ui = new UIView(model);
+                this.client = new WebTorrentView(model);
+                this.throttle = new ThrottleView(model);
+
+                this.getPDFSource();
+                this._render = true;
+
+                this.subscribe("update", "magnetURI", this.onUpdateMagnetURI);
+                this.subscribe("update", "pageNumber", this.onUpdatePageNumber);
+                this.subscribe("update", "scale", this.onUpdateScale);
+                this.subscribe("update", "rotation", this.onUpdateRotation);
+                this.subscribe("update", "offsetX", this.onUpdateOffsetX);
+                this.subscribe("update", "offsetY", this.onUpdateOffsetY);
+            }
+
+            getPDF(blobURL) {
+                this.loadingTask = pdfjsLib.getDocument(blobURL || "croquet.pdf");
+                this.loadingTask.promise.then(pdf => {
+                        this.pdf = pdf;
+                        this.publish("get", "pdf", pdf);
+                        this.render();
+                    });
+            }
+
+            getPDFSource() {
+                if(this.model.magnetURI) {
+                    this.client.add(this.model.magnetURI, torrent => {
+                        const {files} = torrent;
+                        const file = files[0];
+
+                        // https://github.com/webtorrent/webtorrent/blob/master/docs/api.md#filegetbloburlfunction-callback-err-url--browser-only
+                        if(file) {
+                            file.getBlobURL((error, blobURL) => {
+                                if(error)
+                                    console.error(error);
+                                else {
+                                    this.getPDF(blobURL);
+                                }
+                            });
+                        }
+                    });
+                }
+                else {
+                    this.getPDF();
+                }
+            }
+
+            render() {
+                if(this.pdf) {
+                    this.pdf.getPage(this.model.pageNumber).then(page => {
+                        window.page = page;
+                        const viewport = page.getViewport(this.model.getViewportOptions); 
+                        
+                        viewport.transform[4] += this.model.getViewportOptions.offsetX
+                        viewport.transform[5] += this.model.getViewportOptions.offsetY;
+    
+                        canvas.width = viewport.width;
+                        canvas.height = viewport.height;
+    
+                        page.render({
+                            canvasContext : context,
+                            viewport,
+                        });
+                    });
+                }
+            }
+
+            onUpdateMagnetURI() {
+                this.getPDFSource();
+            }
+            onUpdatePageNumber() {
+                this._render = true;
+            }
+            onUpdateScale() {
+                this._render = true;
+            }
+            onUpdateRotation() {
+                this._render = true;
+            }
+            onUpdateOffsetX() {
+                this._render = true;
+            }
+            onUpdateOffsetY() {
+                this._render = true;
+            }
+
+            setMagnetURI(magnetURI) {
+                this.publish("set", "magnetURI", magnetURI);
+            }
+            clearMagnetURI() {
+                this.publish("set", "magnetURI");
+            }
+            setPageNumber(pageNumber) {
+                this.publish("set", "pageNumber", pageNumber);
+            }
+            setScale(scale) {
+                this.publish("set", "scale", scale);
+            }
+            setRotation(rotation) {
+                this.publish("set", "rotation", rotation);
+            }
+            setOffsetX(offsetX) {
+                this.publish("set", "offsetX", offsetX);
+            }
+            setOffsetY(offsetY) {
+                this.publish("set", "offsetY", offsetY);
+            }
+
+            update() {
+                if(this._render) {
+                    this.render();
+                    this._render = false;
+                }
+            }
+
+            detach() {
+                this.client.detach();
+                this.eventListener.detach();
+                this.ui.detach();
+                super.detach();
+            }
+        }
+    </script>
+
+    <script data-croquet-session>
+        Croquet.App.root = false;
+        Croquet.startSession("croquet-pdf-1", Model, View)
+            .then(session => {
+                const {view} = session;
+                window.view = view;
+            });
+    </script>
+</html>
