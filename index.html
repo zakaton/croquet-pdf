@@ -559,7 +559,7 @@
             onCanvasScroll(event) {
                 const {wheelDeltaY} = event;
 
-                const zoomIn = wheelDeltaY > 0;
+                const zoomIn = wheelDeltaY < 0;
 
                 const scale = zoomIn?
                     this.model.getViewportOptions.scale + 0.1:
