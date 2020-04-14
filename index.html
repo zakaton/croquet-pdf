@@ -24,14 +24,7 @@
         }
 
         canvas {
-            
-        }
-
-        canvas:not([data-grabbing]) {
-            cursor: grab;
-        }
-        canvas[data-grabbing] {
-            cursor: grabbing;
+             
         }
 
         #canvasContainer {
@@ -43,50 +36,72 @@
             grid-column: 1 / -1;
         }
 
+        #canvasContainer:not([data-grabbing]) {
+            cursor: grab;
+        }
+        #canvasContainer[data-grabbing] {
+            cursor: grabbing;
+        }
+
+        #pageNumber {
+            grid-row: 1;
+        }
+        #fileUpload {
+            grid-row: 1;
+        }
+
         input[data-page-number] {
-            grid-row: 1;
-            width: 4em;
-        }
-        input[data-file] {
-            grid-row: 1;
-        }
-        button[data-file] {
-            grid-row: 1;
-        }
-        span[data-num-pages] {
-            grid-row: 1;
+            width: 3em;
         }
         input[data-scale] {
-            grid-row: 1;
+            width: 4em;
+        }
+        input[data-rotation] {
+            width: 4em;
         }
         input[data-offset='x'] {
-            grid-row: 1;
             width: 3em;
         }
         input[data-offset='y'] {
-            grid-row: 1;
-            width: 3em;
-        }
-        input[data-rotation] {
-            grid-row: 1;
             width: 3em;
         }
     </style>
 
     <body>
         <div id="container">
-            <input data-page-number type="number" value='1' min='1' step='1'>
-            <span data-num-pages>/</span>
-            
-            <input data-file type="file" accept="application/pdf">
-            <button data-file>Clear Input</button>
-            
-            <input type="number" value='1' data-scale step='0.1' min='0.1' max='10'>
-            
-            <input type="number" data-rotation value='0' min='-360' max='360' step='90'>
 
-            <input type="number" data-offset='x' value='0' step='10'>
-            <input type="number" data-offset='y' value='0' step='10'>
+            <div id="pageNumber">
+                <input data-page-number type="number" value='1' min='1' step='1'>
+                <span data-num-pages>/</span>
+            </div>
+
+            <div id="fileUpload">
+                <input data-file type="file" accept="application/pdf">
+            </div>
+
+            <div id="clearUpload">
+                <button data-file>Reset</button>
+            </div>
+
+            <div id="scale">
+                Scale
+                <input type="number" value='1' data-scale step='0.1' min='0.1' max='10'>
+            </div>
+
+            <div id="rotation">
+                🔄
+                <input type="number" data-rotation value='0' min='-360' max='360' step='90'>
+            </div>
+            
+            <div id="offsetX">
+                ↔️
+                <input type="number" data-offset='x' value='0' step='0.01' min='-1' max='1'>
+            </div>
+
+            <div id="offsetY">
+                ↕️
+                <input type="number" data-offset='y' value='0' step='0.01' min='-1' max='1'>
+            </div>
             
             <div id="canvasContainer">
                 <canvas></canvas>
@@ -108,13 +123,24 @@
                 this.reset();
                 
                 this.subscribe("magnetURI", "set", this.setMagnetURI);
+                
                 this.subscribe("pageNumber", "set", this.setPageNumber);
+                this.subscribe("pageNumber", "next", this.nextPage);
+                this.subscribe("pageNumber", "previous", this.previousPage);
+
                 this.subscribe("scale", "set", this.setScale);
+                this.subscribe("scale", "zoomIn", this.zoomIn);
+                this.subscribe("scale", "zoomOut", this.zoomOut);
+
                 this.subscribe("rotation", "set", this.setRotation);
+                this.subscribe("rotation", "clockwise", this.rotateClockwise);
+                this.subscribe("rotation", "counterClockwise", this.rotateCounterClockwise);
+
                 this.subscribe("offsetX", "set", this.setOffsetX);
+                this.subscribe("offsetX", "shift", this.shiftOffsetX);
+
                 this.subscribe("offsetY", "set", this.setOffsetY);
-
-
+                this.subscribe("offsetY", "shift", this.shiftOffsetY);
             }
 
             reset() {
@@ -142,8 +168,13 @@
 
             setPageNumber(pageNumber) {
                 this.pageNumber = pageNumber;
-                
                 this.publish("pageNumber", "update", pageNumber);
+            }
+            nextPage() {
+                this.setPageNumber(this.pageNumber+1);
+            }
+            previousPage() {
+                this.setPageNumber(this.pageNumber-1);
             }
         
             setScale(scale) {
@@ -151,22 +182,41 @@
         
                 this.publish("scale", "update", scale);
             }
+            zoomIn() {
+                this.setScale(this.getViewportOptions.scale + 0.1);
+            }
+            zoomOut() {
+                this.setScale(this.getViewportOptions.scale - 0.1);
+            }
         
             setRotation(rotation) {
                 this.getViewportOptions.rotation = rotation;
         
                 this.publish("rotation", "update", rotation);
             }
+            rotateClockwise() {
+                this.setRotation(this.getViewportOptions.rotation + 90);
+            }
+            rotateCounterClockwise() {
+                this.setRotation(this.getViewportOptions.rotation - 90);
+            }
             
             setOffsetX(offsetX) {
                 this.getViewportOptions.offsetX = offsetX;
-        
+
                 this.publish("offsetX", "update", offsetX);
             }
+            shiftOffsetX(offsetX) {
+                this.setOffsetX(this.getViewportOptions.offsetX + offsetX);
+            }
+
             setOffsetY(offsetY) {
                 this.getViewportOptions.offsetY = offsetY;
         
                 this.publish("offsetY", "update", offsetY);
+            }
+            shiftOffsetY(offsetY) {
+                this.setOffsetY(this.getViewportOptions.offsetY + offsetY);
             }
         }
         Model.register();
@@ -314,14 +364,14 @@
                 this.subscribe("eventListener", "remove", this._removeEventListeners);
             }
 
-            addEventListener(element, type, listener, thisArg = this) {
+            addEventListener(element, type, listener, options, thisArg = this) {
                 listener = listener.bind(thisArg);
                 this.eventListeners.push({element, type, listener});
 
-                element.addEventListener(type, listener);
+                element.addEventListener(type, listener, options);
             }
-            _addEventListener({element, type, listener, thisArg}) {
-                this.addEventListener(element, type, listener, thisArg);
+            _addEventListener({element, type, listener, options, thisArg}) {
+                this.addEventListener(element, type, listener, options, thisArg);
             }
 
             removeEventListeners() {
@@ -364,7 +414,7 @@
                 });
 
                 this.pageNumberInput = document.querySelector(`input[type="number"][data-page-number]`);
-                this.subscribe("update", "pageNumber", this.onUpdatePageNumber);
+                this.subscribe("pageNumber", "update", this.onUpdatePageNumber);
                 this.publish("eventListener", "add", {
                     element : this.pageNumberInput,
                     type : "input",
@@ -373,7 +423,7 @@
                 });
 
                 this.scaleInput = document.querySelector(`input[data-scale]`);
-                this.subscribe("update", "scale", this.onUpdateScale);
+                this.subscribe("scale", "update", this.onUpdateScale);
                 this.publish("eventListener", "add", {
                     element : this.scaleInput,
                     type : "input",
@@ -382,7 +432,7 @@
                 });
 
                 this.rotationInput = document.querySelector(`input[data-rotation]`);
-                this.subscribe("update", "rotation", this.onUpdateRotation);
+                this.subscribe("rotation", "update", this.onUpdateRotation);
                 this.publish("eventListener", "add", {
                     element : this.rotationInput,
                     type : "input",
@@ -391,7 +441,7 @@
                 });
 
                 this.offsetXInput = document.querySelector(`input[data-offset='x']`);
-                this.subscribe("update", "offsetX", this.onUpdateOffsetX);
+                this.subscribe("offsetX", "update", this.onUpdateOffsetX);
                 this.publish("eventListener", "add", {
                     element : this.offsetXInput,
                     type : "input",
@@ -400,7 +450,7 @@
                 });
 
                 this.offsetYInput = document.querySelector(`input[data-offset='y']`);
-                this.subscribe("update", "offsetY", this.onUpdateOffsetY);
+                this.subscribe("offsetY", "update", this.onUpdateOffsetY);
                 this.publish("eventListener", "add", {
                     element : this.offsetYInput,
                     type : "input",
@@ -409,26 +459,27 @@
                 });
 
                 this.canvas = document.querySelector(`canvas`);
+                this.canvasContainer = document.querySelector(`#canvasContainer`);
                 this.publish("eventListener", "add", {
-                    element : this.canvas,
+                    element : this.canvasContainer,
                     type : "wheel",
                     listener : this.onCanvasScroll,
                     thisArg : this,
                 });
                 this.publish("eventListener", "add", {
-                    element : this.canvas,
+                    element : this.canvasContainer,
                     type : "mousedown",
                     listener : this.onCanvasMouseDown,
                     thisArg : this,
                 });
                 this.publish("eventListener", "add", {
-                    element : this.canvas,
+                    element : this.canvasContainer,
                     type : "mouseup",
                     listener : this.onCanvasMouseUp,
                     thisArg : this,
                 });
                 this.publish("eventListener", "add", {
-                    element : this.canvas,
+                    element : this.canvasContainer,
                     type : "mousemove",
                     listener : this.onCanvasMouseMove,
                     thisArg : this,
@@ -442,20 +493,10 @@
                 });
 
                 this.numPagesSpan = document.querySelector(`span[data-num-pages]`);
-                this.subscribe("pdf", "get", this.onPDF);
-                this.subscribe("page", "get", this.onPage);
+                this.subscribe("pdf", "update", this.onPDF);
+                this.subscribe("page", "update", this.onPage);
 
                 this.onUpdate();
-
-                /*
-                use this if too many messages
-                this.publish("throttle", "publish", {
-                    scope : "set",
-                    event : "scale",
-                    data : scale,
-                    delayMinimum : 10,
-                });
-                */
             }
 
             onFileInput(event) {
@@ -516,42 +557,75 @@
             }
 
             onCanvasScroll(event) {
-                console.log(event);
+                const {wheelDeltaY} = event;
+
+                const zoomIn = wheelDeltaY > 0;
+
+                const scale = zoomIn?
+                    this.model.getViewportOptions.scale + 0.1:
+                    this.model.getViewportOptions.scale - 0.1;
+                
+                this.publish("throttle", "publish", {
+                    scope : "scale",
+                    event : "set",
+                    data : scale,
+                    delayMinimum : 10,
+                });
             }
             onCanvasMouseDown(event) {
-                canvas.dataset.grabbing = '';
+                this.canvasContainer.dataset.grabbing = '';
             }
             onCanvasMouseUp(event) {
-                delete canvas.dataset.grabbing;
+                delete this.canvasContainer.dataset.grabbing;
             }
             onCanvasMouseMove(event) {
-                if(this.canvas.hasAttribute(`data-grabbing`)) {
-                    const {clientX, clientY} = event;
-                    const {offsetX, offsetY} = event;
+                if(this.canvasContainer.hasAttribute(`data-grabbing`)) {
                     const {movementX, movementY} = event;
+
                     console.log(movementX, movementY);
+
+                    const offsetX = movementX/200;
+                    const offsetY = movementY/200;
+
+                    this.publish("throttle", "publish", {
+                        scope : "offsetX",
+                        event : "shift",
+                        data : offsetX,
+                        delayMinimum : 10,
+                    });
+                    this.publish("throttle", "publish", {
+                        scope : "offsetY",
+                        event : "shift",
+                        data : offsetY,
+                        delayMinimum : 10,
+                    });
                 }
             }
 
             onWindowKeydown(event) {
-                switch(event.key) {
-                    case "ArrowRight":
-                        // next slide
-                        break;
-                    case "ArrowLeft":
-                        // previous slide
-                        break;
-                    case "ArrowUp":
-                        // rotate
-                        break;
-                    case "ArrowDown":
-                        // rotate
-                         break;
+                if(document.activeElement == document.body) {
+                    switch(event.key) {
+                        case "ArrowRight":
+                            if(this.model.pageNumber < this.numPages)
+                                this.publish("pageNumber", "next");
+                            break;
+                        case "ArrowLeft":
+                            if(this.model.pageNumber > 1)
+                                this.publish("pageNumber", "previous");
+                            break;
+                        case "ArrowUp":
+                            this.publish("rotation", "clockwise");
+                            break;
+                        case "ArrowDown":
+                            this.publish("rotation", "counterClockwise");
+                            break;
+                    }
                 }
             }
 
             onPDF(pdf) {
                 const {numPages} = pdf._pdfInfo;
+                this.numPages = numPages;
                 this.pageNumberInput.max = numPages;
                 this.numPagesSpan.innerText = `/${numPages}`;
 
@@ -582,10 +656,10 @@
                 super(model);
                 this.model = model;
 
+                this.throttle = new ThrottleView(model);
                 this.eventListener = new EventListener(model);
                 this.ui = new UIView(model);
                 this.client = new WebTorrentView(model);
-                this.throttle = new ThrottleView(model);
 
                 this.getPDFSource();
 
@@ -595,6 +669,10 @@
                 this.subscribe("rotation", "update", this.onUpdateRotation);
                 this.subscribe("offsetX", "update", this.onUpdateOffsetX);
                 this.subscribe("offsetY", "update", this.onUpdateOffsetY);
+
+                this.subscribe("pdf", "get", callback => callback(this.pdf));
+                this.subscribe("page", "get", callback => callback(this.page));
+                this.subscribe("viewport", "get", callback => callback(this.viewport));
             }
 
             getPDFSource() {
@@ -624,7 +702,7 @@
                 this.loadingTask = pdfjsLib.getDocument(blobURL || "croquet.pdf");
                 this.loadingTask.promise.then(pdf => {
                         this.pdf = pdf;
-                        this.publish("pdf", "get", pdf);
+                        this.publish("pdf", "update", pdf);
                         this.getPage();
                     });
             }
@@ -634,7 +712,7 @@
                     this.pdf.getPage(this.model.pageNumber)
                         .then(page => {
                             this.page = page;
-                            this.publish("page", "get", page);
+                            this.publish("page", "update", page);
                             this._render = true;
                         });
                 }
@@ -642,18 +720,29 @@
 
             render() {
                 if(this.page) {
-                    const viewport = this.page.getViewport(this.model.getViewportOptions); 
-                    
-                    viewport.transform[4] += this.model.getViewportOptions.offsetX
-                    viewport.transform[5] += this.model.getViewportOptions.offsetY;
+                    if(!this.rendering) {
+                        const viewport = this.page.getViewport(this.model.getViewportOptions); 
+                        this.viewport = viewport;
 
-                    canvas.width = viewport.width;
-                    canvas.height = viewport.height;
+                        this.publish("viewport", "update", viewport);
 
-                    this.page.render({
-                        canvasContext : context,
-                        viewport,
-                    });
+                        viewport.transform[4] += this.model.getViewportOptions.offsetX * viewport.width;
+                        viewport.transform[5] += this.model.getViewportOptions.offsetY * viewport.height;
+
+                        canvas.width = viewport.width;
+                        canvas.height = viewport.height;
+
+                        this.rendering = true;
+
+                        this.renderingTask = this.page.render({
+                            canvasContext : context,
+                            viewport,
+                        });
+                        this.renderingTask.promise
+                            .then(() => {
+                                this.rendering = false;
+                            });
+                    }
                 }
             }
 
