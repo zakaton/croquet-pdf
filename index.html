@@ -16,7 +16,7 @@
     <style>
         #container {
             display: grid;
-            grid-template-rows: 2em 1fr;
+            grid-template-rows: 3em 1fr;
             grid-template-columns: repeat(7, 1fr);
 
             width: 100%;
@@ -24,7 +24,14 @@
         }
 
         canvas {
-             
+             cursor: inherit;
+             border: solid black;
+        }
+        canvas:not([data-buffer])[data-rendering] {
+            display: none;
+        }
+        canvas[data-buffer]:not([data-rendering]) {
+            display: none;
         }
 
         #canvasContainer {
@@ -32,13 +39,12 @@
             height: 100%;
             overflow: hidden;
 
+            cursor: grab;
+
             grid-row: 2;
             grid-column: 1 / -1;
         }
 
-        #canvasContainer:not([data-grabbing]) {
-            cursor: grab;
-        }
         #canvasContainer[data-grabbing] {
             cursor: grabbing;
         }
@@ -60,10 +66,10 @@
             width: 4em;
         }
         input[data-offset='x'] {
-            width: 3em;
+            width: 4em;
         }
         input[data-offset='y'] {
-            width: 3em;
+            width: 4em;
         }
     </style>
 
@@ -105,13 +111,17 @@
             
             <div id="canvasContainer">
                 <canvas></canvas>
+                <canvas data-buffer></canvas>
             </div>
         </div>
     </body>
 
     <script>
-        const canvas = document.querySelector("canvas");
+        const canvas = document.querySelector(`canvas:not([data-buffer])`);
         const context = canvas.getContext('2d');
+        
+        const bufferCanvas = document.querySelector(`canvas[data-buffer]`);
+        const bufferContext = bufferCanvas.getContext('2d');
     </script>
 
     <script data-croquet-model>
@@ -138,9 +148,11 @@
 
                 this.subscribe("offsetX", "set", this.setOffsetX);
                 this.subscribe("offsetX", "shift", this.shiftOffsetX);
+                this.subscribe("offsetX", "scale", this.scaleOffsetX);
 
                 this.subscribe("offsetY", "set", this.setOffsetY);
                 this.subscribe("offsetY", "shift", this.shiftOffsetY);
+                this.subscribe("offsetY", "scale", this.scaleOffsetY);
             }
 
             reset() {
@@ -203,11 +215,13 @@
             
             setOffsetX(offsetX) {
                 this.getViewportOptions.offsetX = offsetX;
-
                 this.publish("offsetX", "update", offsetX);
             }
             shiftOffsetX(offsetX) {
                 this.setOffsetX(this.getViewportOptions.offsetX + offsetX);
+            }
+            scaleOffsetX(scalar) {
+                this.setOffsetX(this.getViewportOptions.offsetX * scalar);
             }
 
             setOffsetY(offsetY) {
@@ -217,6 +231,9 @@
             }
             shiftOffsetY(offsetY) {
                 this.setOffsetY(this.getViewportOptions.offsetY + offsetY);
+            }
+            scaleOffsetY(scalar) {
+                this.setOffsetX(this.getViewportOptions.offsetX * scalar);
             }
         }
         Model.register();
@@ -461,7 +478,7 @@
                 this.canvas = document.querySelector(`canvas`);
                 this.canvasContainer = document.querySelector(`#canvasContainer`);
                 this.publish("eventListener", "add", {
-                    element : this.canvasContainer,
+                    element : this.canvas,
                     type : "wheel",
                     listener : this.onCanvasScroll,
                     thisArg : this,
@@ -479,7 +496,7 @@
                     thisArg : this,
                 });
                 this.publish("eventListener", "add", {
-                    element : this.canvasContainer,
+                    element : this.canvas,
                     type : "mousemove",
                     listener : this.onCanvasMouseMove,
                     thisArg : this,
@@ -564,11 +581,48 @@
                 const scale = zoomIn?
                     this.model.getViewportOptions.scale + 0.1:
                     this.model.getViewportOptions.scale - 0.1;
-                
+
                 this.publish("throttle", "publish", {
                     scope : "scale",
                     event : "set",
                     data : scale,
+                    delayMinimum : 10,
+                });
+
+                // get canvas position
+                const {width, height} = event.target;
+                const {x, y} = event;
+                const canvasPosition = {
+                    x : x/width,
+                    y : y/height,
+                };
+                // get page position
+                const pagePosition = {
+                    x : (canvasPosition.x - this.model.getViewportOptions.offsetX)/this.model.getViewportOptions.scale,
+                    y : (canvasPosition.y - this.model.getViewportOptions.offsetY)/this.model.getViewportOptions.scale,
+                };
+                // get new page canvas position
+                const newPagePosition = {
+                    x : (pagePosition.x * scale) + this.model.getViewportOptions.offsetX,
+                    y : (pagePosition.y * scale) + this.model.getViewportOptions.offsetY,
+                };
+                // find difference between canvas and new canvas position
+                const offset = {
+                    x : newPagePosition.x - canvasPosition.x,
+                    y : newPagePosition.y - canvasPosition.y,
+                };
+
+                return;
+                this.publish("throttle", "publish", {
+                    scope : "offsetX",
+                    event : "shift",
+                    data : -offset.x,
+                    delayMinimum : 10,
+                });
+                this.publish("throttle", "publish", {
+                    scope : "offsetY",
+                    event : "shift",
+                    data : -offset.y,
                     delayMinimum : 10,
                 });
             }
@@ -581,11 +635,10 @@
             onCanvasMouseMove(event) {
                 if(this.canvasContainer.hasAttribute(`data-grabbing`)) {
                     const {movementX, movementY} = event;
-
-                    console.log(movementX, movementY);
-
-                    const offsetX = movementX/200;
-                    const offsetY = movementY/200;
+                    const {clientWidth, clientHeight} = event.target;
+                    
+                    const offsetX = movementX/clientWidth;
+                    const offsetY = movementY/clientHeight;
 
                     this.publish("throttle", "publish", {
                         scope : "offsetX",
@@ -721,6 +774,11 @@
             render() {
                 if(this.page) {
                     if(!this.rendering) {
+                        bufferCanvas.width = canvas.width;
+                        bufferCanvas.height = canvas.height;
+                        bufferContext.drawImage(canvas, 0, 0, canvas.width, canvas.height);
+                        canvas.dataset.rendering = bufferCanvas.dataset.rendering = '';
+
                         const viewport = this.page.getViewport(this.model.getViewportOptions); 
                         this.viewport = viewport;
 
@@ -732,6 +790,7 @@
                         canvas.width = viewport.width;
                         canvas.height = viewport.height;
 
+
                         this.rendering = true;
 
                         this.renderingTask = this.page.render({
@@ -740,6 +799,8 @@
                         });
                         this.renderingTask.promise
                             .then(() => {
+                                delete canvas.dataset.rendering;
+                                delete bufferCanvas.dataset.rendering;
                                 this.rendering = false;
                             });
                     }
@@ -784,7 +845,7 @@
 
     <script data-croquet-session>
         Croquet.App.root = false;
-        Croquet.startSession("croquet-pdf-1", Model, View)
+        Croquet.startSession("croquet-pdf-2", Model, View)
             .then(session => {
                 const {view} = session;
                 window.view = view;
